@@ -3,7 +3,7 @@
  */
 
 /** Default Marlo API URL */
-export const DEFAULT_MARLO_API_URL = "https://api.marlo.ai";
+export const DEFAULT_MARLO_API_URL = "https://marlo.marshmallo.ai";
 
 /** Environment variable names */
 export const ENV_MARLO_ENABLED = "MARLO_ENABLED";
@@ -12,11 +12,11 @@ export const ENV_MARLO_API_URL = "MARLO_API_URL";
 export const ENV_MARLO_PROJECT_ID = "MARLO_PROJECT_ID";
 export const ENV_MARLO_AUTO_ACTIVATE = "MARLO_AUTO_ACTIVATE";
 
-/** API endpoints */
+/** API endpoints (matching Marlo ingest API routes) */
 export const API_ENDPOINTS = {
-  events: "/api/v1/events",
-  learnings: "/api/v1/learnings",
-  scope: "/internal/marlo/scope",
+  events: "/events",
+  learnings: "/learnings",
+  scope: "/scope",
 } as const;
 
 /** Default configuration values */

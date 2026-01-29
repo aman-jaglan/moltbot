@@ -36,12 +36,9 @@ export async function setupMarlo(
       "evaluates task success (rewards), and generates learnings",
       "to help your assistant improve over time.",
       "",
-      "• Your data stays private",
-      "• You control what's captured",
-      "",
-      "Get your API key at: https://app.marshmallo.ai/login/",
+      "Get your API key at: https://app.marshmallo.ai/dashboard/projects",
     ].join("\n"),
-    "🧠 Marlo",
+    "Marlo",
   );
 
   const enableMarlo = await prompter.confirm({
@@ -73,7 +70,7 @@ export async function setupMarlo(
         return "API key is required";
       }
       if (!isValidApiKeyFormat(value.trim())) {
-        return "Invalid API key format. Should start with marlo_sk_";
+        return "Invalid API key format";
       }
       return undefined;
     },
@@ -123,7 +120,7 @@ export async function setupMarlo(
       `Project: ${scope.project_id}`,
       "",
       "Marlo will now capture trajectories and generate learnings.",
-      "View your dashboard at: https://app.marshmallo.ai/dashboard",
+      "View your dashboard at: https://app.marshmallo.ai",
     ].join("\n"),
     "Connected",
   );

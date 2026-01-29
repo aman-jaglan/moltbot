@@ -50,7 +50,7 @@ export class MarloClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({ events }),
+        body: JSON.stringify(events), // API expects array directly, not { events: [...] }
       });
 
       if (!response.ok) {
@@ -141,7 +141,9 @@ export class MarloClient {
         return null;
       }
 
-      const scope = (await response.json()) as MarloScope;
+      // API returns { scope: {...} }
+      const result = (await response.json()) as { scope: MarloScope };
+      const scope = result.scope;
       this.scopeCache = {
         scope,
         expiresAt: Date.now() + 60000, // Cache for 1 minute

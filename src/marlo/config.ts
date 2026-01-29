@@ -116,8 +116,18 @@ export function isChannelExcluded(channel: string, config?: MoltbotConfig): bool
 
 /**
  * Validate the Marlo API key format.
+ * Accepts both prefixed keys (marlo_sk_xxx) and hex string keys.
  */
 export function isValidApiKeyFormat(apiKey: string): boolean {
-  // Marlo API keys start with "marlo_sk_" or similar prefix
-  return /^marlo_[a-z]+_[a-zA-Z0-9_-]+$/.test(apiKey);
+  // Marlo API keys can be:
+  // 1. Prefixed format: marlo_sk_xxx
+  // 2. Hex string format: 64-character hex string
+  if (/^marlo_[a-z]+_[a-zA-Z0-9_-]+$/.test(apiKey)) {
+    return true;
+  }
+  // Hex string format (64 chars)
+  if (/^[a-fA-F0-9]{64}$/.test(apiKey)) {
+    return true;
+  }
+  return false;
 }
