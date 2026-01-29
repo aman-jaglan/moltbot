@@ -527,6 +527,41 @@ export const MoltbotSchema = z
       })
       .strict()
       .optional(),
+    marlo: z
+      .object({
+        enabled: z.boolean().optional(),
+        apiKey: z.string().optional(),
+        apiUrl: z.string().url().optional(),
+        projectId: z.string().optional(),
+        agentId: z.string().optional(),
+        capture: z
+          .object({
+            tools: z.boolean().optional(),
+            llmCalls: z.boolean().optional(),
+            reasoning: z.boolean().optional(),
+            responses: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        privacy: z
+          .object({
+            redactPII: z.boolean().optional(),
+            excludeChannels: z.array(z.string()).optional(),
+            excludePatterns: z.array(z.string()).optional(),
+          })
+          .strict()
+          .optional(),
+        learnings: z
+          .object({
+            autoActivate: z.boolean().optional(),
+            maxActive: z.number().int().positive().optional(),
+            injectInPrompt: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
