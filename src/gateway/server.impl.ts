@@ -1,5 +1,6 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
+import { initMarlo, shutdownMarlo, isMarloEnabled } from "../marlo/index.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import type { CanvasHostServer } from "../canvas-host/server.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
@@ -214,6 +215,18 @@ export async function startGatewayServer(
   if (diagnosticsEnabled) {
     startDiagnosticHeartbeat();
   }
+
+  // Initialize Marlo learning integration if enabled
+  const marloEnabled = isMarloEnabled(cfgAtStart);
+  if (marloEnabled) {
+    const marloInitialized = await initMarlo(cfgAtStart);
+    if (marloInitialized) {
+      log.info("gateway: Marlo learning integration enabled");
+    } else {
+      log.warn("gateway: Marlo enabled but failed to initialize (check API key)");
+    }
+  }
+
   setGatewaySigusr1RestartPolicy({ allowExternal: cfgAtStart.commands?.restart === true });
   initSubagentRegistry();
   const defaultAgentId = resolveDefaultAgentId(cfgAtStart);
@@ -579,6 +592,12 @@ export async function startGatewayServer(
         skillsRefreshTimer = null;
       }
       skillsChangeUnsub();
+
+      // Shutdown Marlo integration
+      if (marloEnabled) {
+        await shutdownMarlo();
+      }
+
       await close(opts);
     },
   };

@@ -1,5 +1,5 @@
 import type { MoltbotConfig } from "../../config/config.js";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
@@ -8,6 +8,12 @@ import {
   logMessageQueued,
   logSessionStateChange,
 } from "../../logging/diagnostic.js";
+import {
+  isMarloEnabled,
+  startMessageCapture,
+  endMessageCaptureSuccess,
+  endMessageCaptureError,
+} from "../../marlo/index.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { getReplyFromConfig } from "../reply.js";
 import type { FinalizedMsgContext } from "../templating.js";
@@ -230,6 +236,33 @@ export async function dispatchReplyFromConfig(params: {
 
   markProcessing();
 
+  // Start Marlo trajectory capture if enabled
+  // This syncs learnings from previous tasks before processing
+  let marloCapturing = false;
+  if (isMarloEnabled(cfg) && sessionKey) {
+    const body =
+      typeof ctx.BodyForCommands === "string"
+        ? ctx.BodyForCommands
+        : typeof ctx.RawBody === "string"
+          ? ctx.RawBody
+          : typeof ctx.Body === "string"
+            ? ctx.Body
+            : "";
+    const agentId = resolveSessionAgentId({ sessionKey, config: cfg });
+    const workspaceDir = agentId ? resolveAgentWorkspaceDir(cfg, agentId) : undefined;
+    try {
+      marloCapturing = await startMessageCapture({
+        sessionKey,
+        channel,
+        body,
+        workspaceDir,
+        config: cfg,
+      });
+    } catch (err) {
+      logVerbose(`dispatch-from-config: Marlo capture start failed: ${String(err)}`);
+    }
+  }
+
   try {
     const fastAbort = await tryFastAbortFromMessage({ ctx, cfg });
     if (fastAbort.handled) {
@@ -261,6 +294,14 @@ export async function dispatchReplyFromConfig(params: {
       await dispatcher.waitForIdle();
       const counts = dispatcher.getQueuedCounts();
       counts.final += routedFinalCount;
+      // End Marlo capture for fast abort (treated as success)
+      if (marloCapturing && sessionKey) {
+        endMessageCaptureSuccess({
+          sessionKey,
+          response: formatAbortReplyText(fastAbort.stoppedSubagents),
+          config: cfg,
+        });
+      }
       recordProcessed("completed", { reason: "fast_abort" });
       markIdle("message_completed");
       return { queuedFinal, counts };
@@ -401,10 +442,33 @@ export async function dispatchReplyFromConfig(params: {
 
     const counts = dispatcher.getQueuedCounts();
     counts.final += routedFinalCount;
+
+    // End Marlo capture with success
+    if (marloCapturing && sessionKey) {
+      // Collect final response text from replies
+      const responseText = replies
+        .map((r) => r.text ?? "")
+        .filter(Boolean)
+        .join("\n");
+      endMessageCaptureSuccess({
+        sessionKey,
+        response: responseText || accumulatedBlockText || "[no text response]",
+        config: cfg,
+      });
+    }
+
     recordProcessed("completed");
     markIdle("message_completed");
     return { queuedFinal, counts };
   } catch (err) {
+    // End Marlo capture with error
+    if (marloCapturing && sessionKey) {
+      endMessageCaptureError({
+        sessionKey,
+        error: String(err),
+        config: cfg,
+      });
+    }
     recordProcessed("error", { error: String(err) });
     markIdle("message_error");
     throw err;

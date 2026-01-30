@@ -12,6 +12,7 @@ import type {
   TalkConfig,
 } from "./types.gateway.js";
 import type { HooksConfig } from "./types.hooks.js";
+import type { MarloConfig } from "./types.marlo.js";
 import type {
   AudioConfig,
   BroadcastConfig,
@@ -95,6 +96,7 @@ export type MoltbotConfig = {
   canvasHost?: CanvasHostConfig;
   talk?: TalkConfig;
   gateway?: GatewayConfig;
+  marlo?: MarloConfig;
 };
 
 export type ConfigValidationIssue = {

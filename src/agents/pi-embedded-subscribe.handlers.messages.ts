@@ -176,11 +176,21 @@ export function handleMessageEnd(
   });
 
   const text = ctx.stripBlockTags(rawText, { thinking: false, final: false });
+  // Always extract thinking for Marlo capture, even if not displayed to user
   const rawThinking =
-    ctx.state.includeReasoning || ctx.state.streamReasoning
-      ? extractAssistantThinking(assistantMessage) || extractThinkingFromTaggedText(rawText)
-      : "";
+    extractAssistantThinking(assistantMessage) || extractThinkingFromTaggedText(rawText);
   const formattedReasoning = rawThinking ? formatReasoningMessage(rawThinking) : "";
+
+  // Emit thinking as agent event for Marlo to capture (if present)
+  if (rawThinking) {
+    emitAgentEvent({
+      runId: ctx.params.runId,
+      stream: "assistant",
+      data: {
+        thinking: rawThinking,
+      },
+    });
+  }
 
   const addedDuringMessage = ctx.state.assistantTexts.length > ctx.state.assistantTextBaseline;
   const chunkerHasBuffered = ctx.blockChunker?.hasBuffered() ?? false;

@@ -20,6 +20,7 @@ import {
 import { promptRemoteGatewayConfig } from "../commands/onboard-remote.js";
 import { setupSkills } from "../commands/onboard-skills.js";
 import { setupInternalHooks } from "../commands/onboard-hooks.js";
+import { setupMarlo, shouldSkipMarloSetup } from "./onboarding.marlo.js";
 import type {
   GatewayAuthChoice,
   OnboardMode,
@@ -434,6 +435,14 @@ export async function runOnboardingWizard(
 
   // Setup hooks (session memory on /new)
   nextConfig = await setupInternalHooks(nextConfig, runtime, prompter);
+
+  // Setup Marlo learning integration
+  if (shouldSkipMarloSetup(opts)) {
+    await prompter.note("Skipping Marlo setup.", "Marlo");
+  } else {
+    const marloResult = await setupMarlo(nextConfig, runtime, prompter);
+    nextConfig = marloResult.config;
+  }
 
   nextConfig = applyWizardMetadata(nextConfig, { command: "onboard", mode });
   await writeConfigFile(nextConfig);
