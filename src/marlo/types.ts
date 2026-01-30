@@ -37,11 +37,11 @@ export type TrajectoryEventType =
 
 export interface TrajectoryEvent {
   event_id?: string;
-  run_id: number | string;
+  run_id: number; // API requires int
   agent_id: string;
   parent_agent_id?: string | null;
   invocation_id?: string;
-  task_id?: number | string;
+  task_id?: number; // API requires int
   event_type: TrajectoryEventType;
   payload: Record<string, unknown>;
   created_at?: string;

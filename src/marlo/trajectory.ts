@@ -22,9 +22,9 @@ const log = createSubsystemLogger("marlo/trajectory");
  * Active trajectory state for a session.
  */
 interface ActiveTrajectory {
-  runId: string;
+  runId: number;
   sessionKey: string;
-  taskId: string;
+  taskId: number;
   agentId: string;
   startedAt: number;
   events: TrajectoryEvent[];
@@ -50,8 +50,8 @@ function generateRunId(): number {
 /**
  * Generate a unique task ID.
  */
-function generateTaskId(): string {
-  return randomUUID();
+function generateTaskId(): number {
+  return runIdCounter++;
 }
 
 /**
@@ -76,9 +76,9 @@ export function startTrajectory(params: {
   const agentId = params.agentId ?? MOLTBOT_AGENT_ID;
 
   const trajectory: ActiveTrajectory = {
-    runId: String(runId),
+    runId, // Keep as number, API expects int
     sessionKey: params.sessionKey,
-    taskId,
+    taskId, // Keep as number, API expects int
     agentId,
     startedAt: Date.now(),
     events: [],
