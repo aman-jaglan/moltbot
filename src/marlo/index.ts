@@ -11,6 +11,7 @@ import type { MoltbotConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { initMarloClient, getMarloClient, shutdownMarloClient } from "./client.js";
 import { isMarloEnabled, resolveMarloConfig, getMarloApiKey, getMarloApiUrl } from "./config.js";
+import { startEventListener, stopEventListener } from "./event-listener.js";
 import { clearLearningsCache } from "./learnings.js";
 import { shutdownTrajectoryCapture } from "./trajectory.js";
 
@@ -56,6 +57,9 @@ export {
 // Export learnings file sync (file-based - preferred)
 export { syncLearningsFile, hasLearningsFile, removeLearningsFile } from "./learnings-sync.js";
 
+// Export event listener (for intermediate step capture)
+export { startEventListener, stopEventListener } from "./event-listener.js";
+
 // Export capture hooks
 export {
   startMessageCapture,
@@ -98,6 +102,9 @@ export async function initMarlo(config?: MoltbotConfig): Promise<boolean> {
       return false;
     }
 
+    // Start listening to agent events for intermediate step capture
+    startEventListener();
+
     log.info(`Marlo initialized for project ${scope.project_id}`);
     return true;
   } catch (error) {
@@ -115,6 +122,9 @@ export async function shutdownMarlo(): Promise<void> {
   log.debug("Shutting down Marlo integration");
 
   try {
+    // Stop event listener first
+    stopEventListener();
+
     await shutdownTrajectoryCapture();
     clearLearningsCache();
     shutdownMarloClient();
