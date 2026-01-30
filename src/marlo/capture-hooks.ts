@@ -5,6 +5,7 @@
 
 import type { MoltbotConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getMarloClient } from "./client.js";
 import { isMarloEnabled, isChannelExcluded, resolveMarloConfig } from "./config.js";
 import { syncLearningsFile } from "./learnings-sync.js";
 import {
@@ -16,6 +17,13 @@ import {
 } from "./trajectory.js";
 
 const log = createSubsystemLogger("marlo/capture");
+
+/**
+ * Check if Marlo is fully ready (enabled AND client initialized).
+ */
+function isMarloReady(config?: MoltbotConfig): boolean {
+  return isMarloEnabled(config) && getMarloClient() !== null;
+}
 
 export interface CaptureContext {
   sessionKey: string;
@@ -35,7 +43,8 @@ export interface CaptureContext {
 export async function startMessageCapture(ctx: CaptureContext): Promise<boolean> {
   const { sessionKey, channel, body, workspaceDir, config } = ctx;
 
-  if (!isMarloEnabled(config)) {
+  // Check if Marlo is fully ready (enabled + client initialized)
+  if (!isMarloReady(config)) {
     return false;
   }
 
@@ -91,11 +100,8 @@ export function endMessageCaptureSuccess(params: {
   response: string;
   config?: MoltbotConfig;
 }): void {
-  if (!isMarloEnabled(params.config)) {
-    return;
-  }
-
-  if (!hasActiveTrajectory(params.sessionKey)) {
+  // Only proceed if Marlo is fully ready and we have an active trajectory
+  if (!isMarloReady(params.config) || !hasActiveTrajectory(params.sessionKey)) {
     return;
   }
 
@@ -116,11 +122,8 @@ export function endMessageCaptureError(params: {
   error: string;
   config?: MoltbotConfig;
 }): void {
-  if (!isMarloEnabled(params.config)) {
-    return;
-  }
-
-  if (!hasActiveTrajectory(params.sessionKey)) {
+  // Only proceed if Marlo is fully ready and we have an active trajectory
+  if (!isMarloReady(params.config) || !hasActiveTrajectory(params.sessionKey)) {
     return;
   }
 
@@ -151,7 +154,7 @@ export function captureAgentLLMCall(params: {
   error?: string;
   config?: MoltbotConfig;
 }): void {
-  if (!isMarloEnabled(params.config)) {
+  if (!isMarloReady(params.config)) {
     return;
   }
 
@@ -184,7 +187,7 @@ export function captureAgentToolCall(params: {
   durationMs?: number;
   config?: MoltbotConfig;
 }): void {
-  if (!isMarloEnabled(params.config)) {
+  if (!isMarloReady(params.config)) {
     return;
   }
 
