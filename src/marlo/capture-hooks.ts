@@ -7,6 +7,7 @@ import type { MoltbotConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getMarloClient } from "./client.js";
 import { isMarloEnabled, isChannelExcluded, resolveMarloConfig } from "./config.js";
+import { flushPendingLLMEvents } from "./event-listener.js";
 import { syncLearningsFile } from "./learnings-sync.js";
 import {
   startTrajectory,
@@ -105,6 +106,9 @@ export function endMessageCaptureSuccess(params: {
     return;
   }
 
+  // Flush any pending debounced LLM events before ending the trajectory
+  flushPendingLLMEvents(params.sessionKey);
+
   endTrajectory({
     sessionKey: params.sessionKey,
     status: "success",
@@ -126,6 +130,9 @@ export function endMessageCaptureError(params: {
   if (!isMarloReady(params.config) || !hasActiveTrajectory(params.sessionKey)) {
     return;
   }
+
+  // Flush any pending debounced LLM events before ending the trajectory
+  flushPendingLLMEvents(params.sessionKey);
 
   endTrajectory({
     sessionKey: params.sessionKey,

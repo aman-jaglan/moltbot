@@ -41,6 +41,7 @@ import { incrementCompactionCount } from "./session-updates.js";
 import type { TypingController } from "./typing.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
+import { emitAgentEvent } from "../../infra/agent-events.js";
 
 const BLOCK_REPLY_SEND_TIMEOUT_MS = 15_000;
 
@@ -376,6 +377,25 @@ export async function runReplyAgent(params: {
       lookupContextTokens(modelUsed) ??
       activeSessionEntry?.contextTokens ??
       DEFAULT_CONTEXT_TOKENS;
+
+    // Emit usage event for Marlo capture (if usage data is available)
+    if (hasNonzeroUsage(usage) && sessionKey) {
+      emitAgentEvent({
+        runId: `usage-${sessionKey}-${Date.now()}`,
+        stream: "assistant",
+        sessionKey,
+        data: {
+          usage: {
+            inputTokens: usage.input,
+            outputTokens: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+          },
+          model: modelUsed,
+          provider: providerUsed,
+        },
+      });
+    }
 
     await persistSessionUsageUpdate({
       storePath,

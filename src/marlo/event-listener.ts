@@ -15,8 +15,21 @@ const log = createSubsystemLogger("marlo/events");
 // Track tool call start times for duration calculation
 const toolStartTimes = new Map<string, number>();
 
+// Track tool call inputs by toolCallId (to pair with results)
+const toolInputsById = new Map<string, unknown>();
+
 // Track which session a runId belongs to
 const runIdToSession = new Map<string, string>();
+
+// Track last emitted LLM text per session to deduplicate streaming chunks
+const lastLLMTextBySession = new Map<string, string>();
+
+// Debounce timer for LLM calls to only emit the final chunk
+const llmDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const llmPendingData = new Map<string, { text: string; model?: string; provider?: string }>();
+
+// Debounce delay in ms - wait for streaming to settle before emitting
+const LLM_DEBOUNCE_MS = 100;
 
 /**
  * Handle an agent event and forward relevant data to Marlo.
@@ -56,7 +69,7 @@ function handleAgentEvent(event: AgentEventPayload): void {
 }
 
 /**
- * Handle tool events (start, end, error).
+ * Handle tool events (start, result, error).
  */
 function handleToolEvent(sessionKey: string, data: Record<string, unknown>): void {
   const phase = data.phase as string;
@@ -69,17 +82,12 @@ function handleToolEvent(sessionKey: string, data: Record<string, unknown>): voi
     // Record start time for duration calculation
     if (toolCallId) {
       toolStartTimes.set(toolCallId, Date.now());
+      // Store the input args to pair with result later
+      toolInputsById.set(toolCallId, data.args ?? {});
     }
 
-    // Log tool call start (input only)
-    logToolCall({
-      sessionKey,
-      toolName,
-      toolInput: data.args ?? {},
-    });
-
     log.debug(`Tool started: ${toolName}`);
-  } else if (phase === "end" || phase === "error") {
+  } else if (phase === "result" || phase === "end" || phase === "error") {
     // Calculate duration
     let durationMs: number | undefined;
     if (toolCallId && toolStartTimes.has(toolCallId)) {
@@ -87,13 +95,29 @@ function handleToolEvent(sessionKey: string, data: Record<string, unknown>): voi
       toolStartTimes.delete(toolCallId);
     }
 
-    // Log tool call end (with output/error)
+    // Get the original input args
+    const toolInput = toolCallId
+      ? (toolInputsById.get(toolCallId) ?? data.args ?? {})
+      : (data.args ?? {});
+    if (toolCallId) {
+      toolInputsById.delete(toolCallId);
+    }
+
+    const isError = phase === "error" || data.isError === true;
+
+    // Log complete tool call (with input, output, and duration)
     logToolCall({
       sessionKey,
       toolName,
-      toolInput: data.args ?? {},
-      toolOutput: phase === "end" ? data.result : undefined,
-      error: phase === "error" ? String(data.error ?? "Unknown error") : undefined,
+      toolInput,
+      toolOutput: !isError ? data.result : undefined,
+      error: isError
+        ? typeof data.error === "string"
+          ? data.error
+          : typeof data.result === "string"
+            ? data.result
+            : "Unknown error"
+        : undefined,
       durationMs,
     });
 
@@ -102,26 +126,89 @@ function handleToolEvent(sessionKey: string, data: Record<string, unknown>): voi
 }
 
 /**
- * Handle assistant events (text output, thinking).
+ * Handle assistant events (text output, thinking, usage).
+ * Uses debouncing to only emit the final streamed text, not every chunk.
  */
 function handleAssistantEvent(sessionKey: string, data: Record<string, unknown>): void {
   const text = data.text as string | undefined;
   const thinking = data.thinking as string | undefined;
+  const model = (data.model as string) ?? undefined;
+  const provider = (data.provider as string) ?? undefined;
+  const usage = data.usage as
+    | { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number }
+    | undefined;
 
-  // Only log if there's meaningful content
+  // Handle usage data separately (emitted at end of run)
+  if (usage && (usage.inputTokens || usage.outputTokens)) {
+    logLLMCall({
+      sessionKey,
+      messages: [],
+      model,
+      provider,
+      usage: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      },
+    });
+    log.debug(`Usage captured: ${usage.inputTokens} in, ${usage.outputTokens} out`);
+    return;
+  }
+
+  // Only process if there's meaningful content
   if (!text && !thinking) return;
 
-  // Log as LLM call with response
-  logLLMCall({
-    sessionKey,
-    messages: [], // We don't have the full conversation here
-    model: (data.model as string) ?? undefined,
-    provider: (data.provider as string) ?? undefined,
-    response: text ? { text } : undefined,
-    reasoning: thinking ? { thinking } : undefined,
-  });
+  // For thinking/reasoning, log immediately (these are typically not streamed in chunks)
+  if (thinking && !text) {
+    logLLMCall({
+      sessionKey,
+      messages: [],
+      model,
+      provider,
+      reasoning: { thinking },
+    });
+    log.debug(`Assistant reasoning captured: ${thinking.slice(0, 50)}...`);
+    return;
+  }
 
-  log.debug(`Assistant response: ${text?.slice(0, 50)}...`);
+  // For text responses, use debouncing to only capture the final chunk
+  // This prevents logging every streaming delta as a separate event
+  if (text) {
+    const lastText = lastLLMTextBySession.get(sessionKey) ?? "";
+
+    // Skip if this is a substring of what we already have (backward delta)
+    if (lastText.startsWith(text)) {
+      return;
+    }
+
+    // Update pending data with the latest (longest) text
+    llmPendingData.set(sessionKey, { text, model, provider });
+    lastLLMTextBySession.set(sessionKey, text);
+
+    // Clear existing debounce timer
+    const existingTimer = llmDebounceTimers.get(sessionKey);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    // Set new debounce timer - will emit after streaming settles
+    const timer = setTimeout(() => {
+      const pending = llmPendingData.get(sessionKey);
+      if (pending) {
+        logLLMCall({
+          sessionKey,
+          messages: [],
+          model: pending.model,
+          provider: pending.provider,
+          response: { text: pending.text },
+        });
+        log.debug(`Assistant response captured: ${pending.text.slice(0, 50)}...`);
+        llmPendingData.delete(sessionKey);
+      }
+      llmDebounceTimers.delete(sessionKey);
+    }, LLM_DEBOUNCE_MS);
+
+    llmDebounceTimers.set(sessionKey, timer);
+  }
 }
 
 /**
@@ -169,7 +256,42 @@ export function stopEventListener(): void {
     unsubscribe();
     unsubscribe = null;
     toolStartTimes.clear();
+    toolInputsById.clear();
     runIdToSession.clear();
+    lastLLMTextBySession.clear();
+    // Clear all debounce timers
+    for (const timer of llmDebounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    llmDebounceTimers.clear();
+    llmPendingData.clear();
     log.info("Stopped agent event listener");
   }
+}
+
+/**
+ * Flush any pending debounced LLM calls for a session.
+ * Call this when a trajectory ends to ensure all events are captured.
+ */
+export function flushPendingLLMEvents(sessionKey: string): void {
+  const timer = llmDebounceTimers.get(sessionKey);
+  if (timer) {
+    clearTimeout(timer);
+    llmDebounceTimers.delete(sessionKey);
+  }
+
+  const pending = llmPendingData.get(sessionKey);
+  if (pending) {
+    logLLMCall({
+      sessionKey,
+      messages: [],
+      model: pending.model,
+      provider: pending.provider,
+      response: { text: pending.text },
+    });
+    llmPendingData.delete(sessionKey);
+  }
+
+  // Clear tracking for this session
+  lastLLMTextBySession.delete(sessionKey);
 }

@@ -2,7 +2,7 @@
  * Trajectory capture and event management for Marlo integration.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getMarloClient } from "./client.js";
 import { BUFFER_SETTINGS, MOLTBOT_AGENT_ID } from "./constants.js";
@@ -37,21 +37,53 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 // Active trajectories by session key
 const activeTrajectories = new Map<string, ActiveTrajectory>();
 
-// Incrementing run ID for sessions
-let runIdCounter = Date.now();
+// Cache session keys to run IDs for consistency within a session
+const sessionKeyToRunId = new Map<string, number>();
+
+// Incrementing task ID counter
+let taskIdCounter = Date.now();
+
+// Cache the project ID once verified
+let cachedProjectId: string | null = null;
 
 /**
- * Generate a unique run ID.
+ * Set the project ID (called when client is initialized and verified).
  */
-function generateRunId(): number {
-  return runIdCounter++;
+export function setProjectId(projectId: string): void {
+  cachedProjectId = projectId;
+}
+
+/**
+ * Compute a consistent session/run ID from project ID and session key.
+ * Uses the same approach as marlo-ts to ensure tasks within a session
+ * are grouped together.
+ */
+function computeSessionId(sessionKey: string): number {
+  const projectId = cachedProjectId ?? "unknown";
+
+  // Check cache first
+  const cached = sessionKeyToRunId.get(sessionKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Compute a deterministic hash of projectId:sessionKey
+  const hash = createHash("sha256").update(`${projectId}:${sessionKey}`).digest("hex");
+
+  // Convert first 12 hex chars to a number (fits in JS safe integer range)
+  const runId = parseInt(hash.slice(0, 12), 16);
+
+  // Cache for future use
+  sessionKeyToRunId.set(sessionKey, runId);
+
+  return runId;
 }
 
 /**
  * Generate a unique task ID.
  */
 function generateTaskId(): number {
-  return runIdCounter++;
+  return taskIdCounter++;
 }
 
 /**
@@ -71,14 +103,15 @@ export function startTrajectory(params: {
   agentId?: string;
   metadata?: Record<string, unknown>;
 }): ActiveTrajectory {
-  const runId = generateRunId();
+  // Use consistent session ID based on sessionKey (not a new random ID each time)
+  const runId = computeSessionId(params.sessionKey);
   const taskId = generateTaskId();
   const agentId = params.agentId ?? MOLTBOT_AGENT_ID;
 
   const trajectory: ActiveTrajectory = {
-    runId, // Keep as number, API expects int
+    runId, // Consistent per session, API expects int
     sessionKey: params.sessionKey,
-    taskId, // Keep as number, API expects int
+    taskId, // Unique per task within session
     agentId,
     startedAt: Date.now(),
     events: [],
@@ -177,6 +210,23 @@ export function logLLMCall(params: {
     reasoning: params.reasoning,
     error: params.error,
   } satisfies LLMCallPayload);
+
+  bufferEvent(event);
+}
+
+/**
+ * Log reasoning/thinking for the current trajectory.
+ * Used to capture Claude's extended thinking and other model reasoning.
+ */
+export function logReasoning(params: { sessionKey: string; thinking: string }): void {
+  const trajectory = activeTrajectories.get(params.sessionKey);
+  if (!trajectory) {
+    return;
+  }
+
+  const event = createEvent(trajectory, "log", {
+    reasoning: params.thinking,
+  });
 
   bufferEvent(event);
 }

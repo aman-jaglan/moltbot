@@ -13,7 +13,7 @@ import { initMarloClient, getMarloClient, shutdownMarloClient } from "./client.j
 import { isMarloEnabled, resolveMarloConfig, getMarloApiKey, getMarloApiUrl } from "./config.js";
 import { startEventListener, stopEventListener } from "./event-listener.js";
 import { clearLearningsCache } from "./learnings.js";
-import { shutdownTrajectoryCapture } from "./trajectory.js";
+import { shutdownTrajectoryCapture, setProjectId } from "./trajectory.js";
 
 const log = createSubsystemLogger("marlo");
 
@@ -39,10 +39,12 @@ export {
   endTrajectory,
   logLLMCall,
   logToolCall,
+  logReasoning,
   logAgentDefinition,
   getActiveTrajectory,
   hasActiveTrajectory,
   flushBuffer,
+  setProjectId,
 } from "./trajectory.js";
 
 // Export learnings (prompt-based - legacy)
@@ -58,7 +60,7 @@ export {
 export { syncLearningsFile, hasLearningsFile, removeLearningsFile } from "./learnings-sync.js";
 
 // Export event listener (for intermediate step capture)
-export { startEventListener, stopEventListener } from "./event-listener.js";
+export { startEventListener, stopEventListener, flushPendingLLMEvents } from "./event-listener.js";
 
 // Export capture hooks
 export {
@@ -101,6 +103,9 @@ export async function initMarlo(config?: MoltbotConfig): Promise<boolean> {
       shutdownMarloClient();
       return false;
     }
+
+    // Cache project ID for consistent session ID generation
+    setProjectId(scope.project_id);
 
     // Start listening to agent events for intermediate step capture
     startEventListener();
